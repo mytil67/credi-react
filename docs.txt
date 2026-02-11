@@ -1,0 +1,182 @@
+Documentation Technique - Application CREDI (React Version)
+1. Architecture Générale
+L'application est une Single Page Application (SPA) construite avec React. Elle fonctionne entièrement côté client (dans le navigateur), sans serveur backend (Serverless).
+
+Runtime : React 18+ (Vite)
+
+Base de Données : SQLite (via sql.js en WebAssembly). La BDD réside en mémoire RAM du navigateur.
+
+Persistance : Export/Import manuel d'un fichier binaire .db.
+
+Styling : Tailwind CSS.
+
+Icônes : Lucide React.
+
+Parsing PDF : pdfjs-dist.
+
+2. Structure du Projet
+Plaintext
+src/
+├── constants/
+│   └── territories.js       # Référentiel CONSTANT des Lots/Territoires et Écoles associées.
+├── context/
+│   └── DatabaseContext.jsx  # Context React global. Gère l'instance SQL.js et l'état de chargement.
+├── layouts/
+│   └── Sidebar.jsx          # Menu de navigation latéral.
+├── pages/
+│   ├── UploadPage.jsx       # Import PDF, Scan dossier, Batch processing.
+│   ├── DataPage.jsx         # Tableau principal avec filtres, pagination et KPIs.
+│   ├── CheckPage.jsx        # Algorithme de contrôle qualité (Semaines manquantes).
+│   ├── TerritoriesPage.jsx  # Vue agrégée par Lot (pour facturation).
+│   ├── StrikesPage.jsx      # Gestion des jours de grève.
+│   └── SummaryPage.jsx      # Synthèse globale.
+├── services/
+│   ├── db.js                # Wrapper SQL : Création tables, CRUD, Requêtes complexes.
+│   └── pdfParser.js         # Moteur d'extraction des données PDF (Regex).
+└── App.jsx                  # Routeur simple (Switch case).
+3. Schéma de Base de Données (SQLite)
+La base contient 3 tables principales.
+
+Table deliveries (Données brutes)
+Stocke chaque ligne de commande extraite d'un PDF.
+
+SQL
+CREATE TABLE deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL,       -- ID unique généré (ex: doc_EM-KLEBER_45)
+    base_school TEXT NOT NULL,       -- Nom école (ex: "EM KLEBER")
+    school_type TEXT NOT NULL,       -- Type brut (ex: "ECOLE MATERNELLE KLEBER")
+    week_number TEXT,                -- Semaine (ex: "45")
+    regime TEXT NOT NULL,            -- Ex: "SANS PORC", "STANDARD", "ADULTE..."
+    monday INTEGER DEFAULT 0,        -- Quantités...
+    tuesday INTEGER DEFAULT 0,
+    wednesday INTEGER DEFAULT 0,
+    thursday INTEGER DEFAULT 0,
+    friday INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    document_date TEXT,
+    school_year TEXT,                -- Ex: "2023-2024"
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_school_week ON deliveries(base_school, week_number);
+Table school_details (Référentiel)
+Associe une école à son territoire. Remplie automatiquement via syncSchoolTerritories.
+
+SQL
+CREATE TABLE school_details (
+    school_name TEXT PRIMARY KEY,
+    territory TEXT DEFAULT 'Non assigné' -- Ex: "Lot 1 : Hautepierre"
+);
+Table strike_days (Exceptions)
+SQL
+CREATE TABLE strike_days (
+    id INTEGER PRIMARY KEY,
+    school_year TEXT,
+    week_number TEXT,
+    day TEXT,       -- 'monday', 'tuesday'...
+    strike_date TEXT
+);
+4. Modules Clés & Algorithmes
+A. Parsing PDF (src/services/pdfParser.js)
+Analyse le PDF ligne par ligne en utilisant des coordonnées spatiales (buckets Y) pour reconstituer les phrases.
+
+Extraction Semaine : Regex /semaine\s*(\d+)/i.
+
+Extraction Données : Regex /^(.*?)\s+(ADULTE\s+)?(HALAL|STANDARD|...)\s+([\d\s]+)$/i.
+
+Optimisation Mémoire : Utilise page.cleanup() et pdf.destroy() impérativement pour éviter les fuites de mémoire lors du scan de masse.
+
+B. Chargement par Lots & Anti-Crash (src/pages/UploadPage.jsx)
+Pour éviter le gel du navigateur lors du scan de 1000+ fichiers :
+
+Batching : Les fichiers sont traités par paquets de 10.
+
+Temporisation : Une pause de 20ms (await new Promise...) est forcée entre chaque paquet pour libérer l'Event Loop UI.
+
+Transaction SQL : BEGIN TRANSACTION et COMMIT englobent chaque paquet pour accélérer les écritures (x100 vitesse).
+
+C. Protection des Données - Anti-Doublon (src/services/db.js)
+Fonction insertDelivery.
+
+Logique : Avant d'insérer, on vérifie si un enregistrement existe déjà pour {base_school, week_number, school_type, school_year}.
+
+Règle : Si SELECT 1 renvoie un résultat -> On ignore l'insertion (return false).
+
+But : Préserver les modifications manuelles ou suppressions faites par l'utilisateur si on rescane les PDF originaux.
+
+D. Contrôle Qualité & Semaines Manquantes (src/pages/CheckPage.jsx)
+C'est le module le plus complexe métier.
+
+Référentiel de Semaines (EXPECTED_WEEKS_RAW) :
+
+Liste codée en dur des semaines d'école (exclut déjà Toussaint, Noël, etc.).
+
+Source : Script original utilisateur.
+
+Note Dev : À mettre à jour si le calendrier scolaire change drastiquement.
+
+Tri Chronologique Scolaire :
+
+Un tri standard (1, 2, 3...) ne fonctionne pas pour une année scolaire (36...52 -> 01...30).
+
+Algorithme : Si semaine < 30, on ajoute un poids de +52 pour le tri. Résultat : 36, 37 ... 52, 01, 02.
+
+Calcul des Manquants (Dynamique) :
+
+On détermine la currentWeek (semaine actuelle système).
+
+On filtre la liste EXPECTED_WEEKS pour ne garder que les semaines inférieures ou égales à currentWeek.
+
+On compare avec les semaines présentes en base (presentWeeks).
+
+Exceptions Métier :
+
+Lycée Couffignal : Règle spécifique injectée dans la boucle map. Si l'école contient "COUFFIGNAL", on arrête de vérifier les manquants après la semaine 45.
+
+5. Gestion des Territoires (src/constants/territories.js)
+Fichier de configuration statique exportant TERRITORIES_MAPPING.
+
+Contient la structure : [{ name: "Nom Lot", schools: ["ECOLE A", "ECOLE B"] }].
+
+Utilisé par db.js > syncSchoolTerritories pour peupler la table school_details au démarrage ou à l'import.
+
+Logique de Matching : Recherche floue (Fuzzy). Si le PDF contient "EM KLEBER" et la config a "KLEBER", le match est fait.
+
+6. Performance & Optimisations UI
+Pagination (src/pages/DataPage.jsx)
+L'affichage de 5000 lignes gèle le DOM.
+
+Mise en place d'une pagination locale.
+
+itemsPerPage (50, 100, 500).
+
+Important : Les calculs de KPI (Totaux en haut de page) se font toujours sur le dataset complet filtré, pas seulement sur la page visible.
+
+Logs (src/pages/UploadPage.jsx)
+Le tableau de logs est limité aux 200 dernières entrées (FIFO) pour éviter de surcharger la mémoire du navigateur lors des gros scans.
+
+7. Guide Maintenance Rapide
+Changer les semaines d'école (Vacances) :
+
+Modifier EXPECTED_WEEKS_RAW dans src/pages/CheckPage.jsx.
+
+Ajouter une nouvelle école à un Lot :
+
+Modifier src/constants/territories.js.
+
+Au prochain rechargement de l'app, la synchro se fera automatiquement.
+
+Modifier les règles de parsing (ex: nouveau format PDF) :
+
+Modifier src/services/pdfParser.js.
+
+8. Commandes Utiles (Dev)
+Bash
+# Installation
+npm install
+
+# Lancement serveur local
+npm run dev
+
+# Build production
+npm run build
