@@ -190,6 +190,56 @@ export const insertDelivery = (db, data) => {
   }
 };
 
+// --- INSERTION MANUELLE (Écrase si existant) ---
+export const saveManualEntry = (db, data) => {
+  try {
+    db.exec("BEGIN TRANSACTION");
+    
+    // On supprime l'entrée si elle existe déjà pour la remplacer (Correction)
+    const delStmt = db.prepare(`DELETE FROM deliveries WHERE base_school = ? AND school_type = ? AND week_number = ? AND school_year = ? AND regime = ?`);
+    delStmt.run([data.base_school, data.school_type, data.week_number, data.school_year, data.regime]);
+    delStmt.free();
+
+    const stmt = db.prepare(`INSERT INTO deliveries (
+        document_id, base_school, school_type, week_number, regime, 
+        monday, tuesday, wednesday, thursday, friday, total, document_date, school_year
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    stmt.run([
+      data.document_id, data.base_school, data.school_type, data.week_number, data.regime,
+      data.monday, data.tuesday, 0, data.thursday, data.friday, data.total, data.document_date, data.school_year
+    ]);
+    stmt.free();
+    
+    // Mise à jour du territoire si l'école est totalement nouvelle
+    const existsSchool = db.exec("SELECT 1 FROM school_details WHERE school_name = ?", [data.base_school]);
+    if (existsSchool.length === 0) {
+      db.run("INSERT INTO school_details (school_name) VALUES (?)", [data.base_school]);
+    }
+
+    db.exec("COMMIT");
+    return true;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    console.error("Erreur saveManualEntry:", error);
+    return false;
+  }
+};
+
+// --- LECTURE & FILTRES ---
+export const getAllSchoolsList = (db) => {
+  try {
+    const res = db.exec(`
+      SELECT DISTINCT name FROM (
+        SELECT school_name as name FROM cantines
+        UNION
+        SELECT base_school as name FROM deliveries
+      ) ORDER BY name
+    `);
+    return res.length ? res[0].values.flat() : [];
+  } catch (e) { return []; }
+};
+
+
 // --- LECTURE & FILTRES ---
 export const getUniqueValues = (db, column) => {
   try {

@@ -6,6 +6,7 @@ import SummaryPage from './pages/SummaryPage';
 import StrikesPage from './pages/StrikesPage';
 import TerritoriesPage from './pages/TerritoriesPage';
 import CheckPage from './pages/CheckPage';
+import ManualEntryPage from './pages/ManualEntryPage';
 
 function App() {
   const [activeTab, setActiveTab] = useState('upload');
@@ -16,6 +17,7 @@ const renderContent = () => {
         return <UploadPage />;
       case 'data':
         return <DataPage />; 
+		case 'manual': return <ManualEntryPage />;
 		case 'territories': return <TerritoriesPage />;// <--- Utilisation
 		case 'strikes': return <StrikesPage />;
       case 'summary': return <SummaryPage />;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Upload, BarChart3, LayoutDashboard, Ban, Map, CheckSquare } from 'lucide-react';
+import { Database, Upload, BarChart3, LayoutDashboard, Ban, Map, CheckSquare, Edit3 } from 'lucide-react';
 import { useDatabase } from '../context/DatabaseContext';
 
 const Sidebar = ({ activeTab, setActiveTab }) => {
@@ -8,6 +8,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
   const menuItems = [
     { id: 'upload', label: 'Charger Données', icon: Upload },
     { id: 'data', label: 'Données & Filtres', icon: Database },
+	{ id: 'manual', label: 'Saisie Manuelle', icon: Edit3 },
     { id: 'territories', label: 'Vue par Territoire', icon: Map },
     { id: 'check', label: 'Contrôle & Qualité', icon: CheckSquare }, // <--- C'EST CETTE LIGNE QUI AJOUTE L'ONGLET
     { id: 'strikes', label: 'Jours Grèves / Fériés', icon: Ban },
